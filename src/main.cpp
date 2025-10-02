@@ -26,30 +26,34 @@ enum class SFUError {
 };
 
 struct SubscriberTrackRef {
-    rtc::Track* track{nullptr};
+    rtc::Track *track{nullptr};
     std::atomic<bool> active{true};
 
     constexpr SubscriberTrackRef() noexcept = default;
-    explicit SubscriberTrackRef(rtc::Track* track) noexcept
-        : track(track) {}
+
+    explicit SubscriberTrackRef(rtc::Track *track) noexcept
+        : track(track) {
+    }
 
     [[nodiscard]] bool is_valid() const noexcept {
-        return track && active.load(std::memory_order_relaxed);
+        return track != nullptr && active.load(std::memory_order_relaxed);
     }
 };
 
 class TrackBroadcaster {
 public:
-    TrackBroadcaster(rtc::Track* remote_track, std::string_view publisher_id)
+    TrackBroadcaster(rtc::Track *remote_track, std::string_view publisher_id)
         : remote_track(remote_track), running(true) {
         std::println("TrackBroadcaster created for: {}", publisher_id);
 
         remote_track->onMessage(
-            [this](const rtc::binary& message) {
-                if (!running.load(std::memory_order_relaxed)) [[unlikely]] return;
+            [this](const rtc::binary &message) {
+                if (!running.load(std::memory_order_relaxed)) [[unlikely]] {
+                    return;
+                }
 
                 std::lock_guard lock(mutex);
-                for (auto& sub : subscribers) {
+                for (auto &sub: subscribers) {
                     if (sub.is_valid()) [[likely]] {
                         try {
                             sub.track->send(message);
@@ -63,10 +67,13 @@ public:
         );
     }
 
-    TrackBroadcaster(const TrackBroadcaster&) = delete;
-    TrackBroadcaster& operator=(const TrackBroadcaster&) = delete;
-    TrackBroadcaster(TrackBroadcaster&&) = delete;
-    TrackBroadcaster& operator=(TrackBroadcaster&&) = delete;
+    TrackBroadcaster(const TrackBroadcaster &) = delete;
+
+    TrackBroadcaster &operator=(const TrackBroadcaster &) = delete;
+
+    TrackBroadcaster(TrackBroadcaster &&) = delete;
+
+    TrackBroadcaster &operator=(TrackBroadcaster &&) = delete;
 
     ~TrackBroadcaster() noexcept {
         stop();
@@ -78,25 +85,25 @@ public:
         subscribers.clear();
     }
 
-    void add_subscriber(rtc::Track* track) {
+    void add_subscriber(rtc::Track *track) {
         std::lock_guard lock(mutex);
         subscribers.emplace_back(track);
         std::println("Subscriber track added, total: {}", subscribers.size());
     }
 
-    void remove_subscriber_track(const rtc::Track* track) noexcept {
+    void remove_subscriber_track(const rtc::Track *track) noexcept {
         std::lock_guard lock(mutex);
 
-        const auto it = std::ranges::find_if(
+        const auto sub_it = std::ranges::find_if(
             subscribers,
-            [&](const SubscriberTrackRef& sub) {
+            [&](const SubscriberTrackRef &sub) {
                 return sub.track == track;
             }
         );
 
-        if (it != subscribers.end()) {
-            it->active.store(false, std::memory_order_relaxed);
-            subscribers.erase(it);
+        if (sub_it != subscribers.end()) {
+            sub_it->active.store(false, std::memory_order_relaxed);
+            subscribers.erase(sub_it);
         }
 
         std::println("Subscriber track removed, remaining: {}", subscribers.size());
@@ -110,18 +117,20 @@ public:
         std::lock_guard lock(mutex);
         return subscribers.size();
     }
+
 private:
-    rtc::Track* remote_track;
+    rtc::Track *remote_track;
     mutable std::mutex mutex;
     std::list<SubscriberTrackRef> subscribers;
-    alignas(32) std::atomic<bool> running; // Now class is 128 bytes, so it takes two cache lines, and I do not have false sharing problems here
+    alignas(32) std::atomic<bool> running;
+    // Now class is 128 bytes, so it takes two cache lines, and I do not have false sharing problems here
 };
 
 struct BroadcasterPool {
-    std::list<std::unique_ptr<TrackBroadcaster>> broadcasters;
+    std::list<std::unique_ptr<TrackBroadcaster> > broadcasters;
     mutable std::mutex mutex; // 64 bytes is a good size
 
-    TrackBroadcaster* acquire(rtc::Track* track, std::string_view publisher_id) {
+    TrackBroadcaster *acquire(rtc::Track *track, std::string_view publisher_id) {
         std::unique_lock lock(mutex);
         broadcasters.push_back(
             std::make_unique<TrackBroadcaster>(track, publisher_id)
@@ -129,10 +138,10 @@ struct BroadcasterPool {
         return broadcasters.back().get();
     }
 
-    void release(TrackBroadcaster* broadcaster) {
+    void release(TrackBroadcaster *broadcaster) {
         std::unique_lock lock(mutex);
-        std::erase_if(broadcasters, [broadcaster](const auto& b) {
-            return b.get() == broadcaster;
+        std::erase_if(broadcasters, [broadcaster](const auto &item) {
+            return item.get() == broadcaster;
         });
     }
 };
@@ -142,54 +151,71 @@ struct PublisherInfo {
     std::string publisher_id;
     std::string stream_type;
 
-    std::array<TrackBroadcaster*, MAX_TRACKS_PER_PUBLISHER> broadcasters{nullptr, nullptr};
+    std::array<TrackBroadcaster *, MAX_TRACKS_PER_PUBLISHER> broadcasters{nullptr, nullptr};
     alignas(32) std::atomic<size_t> subscriber_count{0};
     alignas(32) std::atomic<bool> running{true};
-    std::mutex mutex; // 3 cache lines... Can be better i think
+    std::mutex mutex; // 3 cache lines... Can be better I think
 
     PublisherInfo() noexcept = default;
 
     explicit PublisherInfo(std::unique_ptr<rtc::PeerConnection> pc, std::string id, std::string type)
-        : pc(std::move(pc)), publisher_id(std::move(id)), stream_type(std::move(type)) {}
+        : pc(std::move(pc)), publisher_id(std::move(id)), stream_type(std::move(type)) {
+    }
 
-    PublisherInfo(PublisherInfo&&) = delete;
-    PublisherInfo& operator=(PublisherInfo&&) = delete;
-    PublisherInfo(const PublisherInfo&) = delete;
-    PublisherInfo& operator=(const PublisherInfo&) = delete;
+    PublisherInfo(PublisherInfo &&) = delete;
 
-    [[nodiscard]] std::span<TrackBroadcaster* const> get_valid_broadcasters() const noexcept {
+    PublisherInfo &operator=(PublisherInfo &&) = delete;
+
+    PublisherInfo(const PublisherInfo &) = delete;
+
+    PublisherInfo &operator=(const PublisherInfo &) = delete;
+
+    [[nodiscard]] std::span<TrackBroadcaster * const> get_valid_broadcasters() const noexcept {
         size_t count = 0;
-        if (broadcasters[0] != nullptr) ++count;
-        if (broadcasters[1] != nullptr) ++count;
+        if (broadcasters[0] != nullptr) {
+            ++count;
+        }
+        if (broadcasters[1] != nullptr) {
+            ++count;
+        }
         return {broadcasters.data(), count};
     }
 };
 
 struct SubscriberInfo {
     std::unique_ptr<rtc::PeerConnection> pc;
-    std::array<rtc::Track*, MAX_TRACKS_PER_PUBLISHER> tracks{nullptr, nullptr};
+    std::array<rtc::Track *, MAX_TRACKS_PER_PUBLISHER> tracks{nullptr, nullptr};
     size_t publisher_index{0};
     alignas(32) std::atomic<bool> active{true}; // 64 bytes is a good size
 
     SubscriberInfo() noexcept = default;
 
     explicit SubscriberInfo(std::unique_ptr<rtc::PeerConnection> p, size_t pub_idx) noexcept
-        : pc(std::move(p)), publisher_index(pub_idx) {}
+        : pc(std::move(p)), publisher_index(pub_idx) {
+    }
 
-    SubscriberInfo(SubscriberInfo&&) noexcept = delete;
-    SubscriberInfo& operator=(SubscriberInfo&&) noexcept = delete;
-    SubscriberInfo(const SubscriberInfo&) = delete;
-    SubscriberInfo& operator=(const SubscriberInfo&) = delete;
+    SubscriberInfo(SubscriberInfo &&) noexcept = delete;
 
-    [[nodiscard]] std::span<rtc::Track* const> get_valid_tracks() const noexcept {
+    SubscriberInfo &operator=(SubscriberInfo &&) noexcept = delete;
+
+    SubscriberInfo(const SubscriberInfo &) = delete;
+
+    SubscriberInfo &operator=(const SubscriberInfo &) = delete;
+
+    [[nodiscard]] std::span<rtc::Track * const> get_valid_tracks() const noexcept {
         size_t count = 0;
-        if (tracks[0] != nullptr) ++count;
-        if (tracks[1] != nullptr) ++count;
+        if (tracks[0] != nullptr) {
+            ++count;
+        }
+        if (tracks[1] != nullptr) {
+            ++count;
+        }
         return {tracks.data(), count};
     }
 };
 
-class PeerManager { // bad structure very heavy
+class PeerManager {
+    // bad structure very heavy
 public:
     PeerManager() {
         rtc::Configuration c;
@@ -202,10 +228,9 @@ public:
     }
 
     [[nodiscard]] std::expected<size_t, SFUError>
-    add_publisher(std::string_view publisher_id, std::string_view stream_type) {
-        {
+    add_publisher(std::string_view publisher_id, std::string_view stream_type) { {
             std::lock_guard lock(publisher_mutex);
-            for (const auto& pub : publishers) {
+            for (const auto &pub: publishers) {
                 if (pub->publisher_id == publisher_id && pub->stream_type == stream_type) {
                     std::println("Publisher already exists: {}", publisher_id);
                     return std::unexpected(SFUError::ConnectionFailed); // error?
@@ -216,14 +241,19 @@ public:
         try {
             auto pc = std::make_unique<rtc::PeerConnection>(config);
 
-            size_t publisher_index{0};
-            {
+            size_t publisher_index{0}; {
                 std::unique_lock lock(publisher_mutex);
                 publisher_index = publishers.size();
-                publishers.emplace_back(std::make_unique<PublisherInfo>(std::move(pc), std::string(publisher_id), std::string(stream_type)));
+                publishers.emplace_back(
+                    std::make_unique<PublisherInfo>(
+                        std::move(pc),
+                        std::string(publisher_id),
+                        std::string(stream_type)
+                    )
+                );
             }
 
-            auto* publisher = publishers[publisher_index].get();
+            auto *publisher = publishers[publisher_index].get();
             publisher->pc->onStateChange([this, publisher_index](rtc::PeerConnection::State state) {
                 std::println("Publisher state: {}", static_cast<int>(state));
                 if (state == rtc::PeerConnection::State::Disconnected ||
@@ -245,11 +275,11 @@ public:
 
             video_track->setMediaHandler(std::make_shared<rtc::MediaHandler>());
 
-            auto* video_track_ptr = video_track.get();
+            auto *video_track_ptr = video_track.get();
 
             video_track->onMessage(
-                [this, publisher_index, video_track_ptr](const rtc::binary& message) {
-                    auto* pub = publishers[publisher_index].get();
+                [this, publisher_index, video_track_ptr](const rtc::binary &message) {
+                    auto *pub = publishers[publisher_index].get();
                     std::lock_guard lock(publisher_mutex);
 
                     if (pub->broadcasters[0] == nullptr) {
@@ -267,11 +297,11 @@ public:
                 auto audio_track = publisher->pc->addTrack(audio_media.description());
                 audio_track->setMediaHandler(std::make_shared<rtc::MediaHandler>());
 
-                auto* audio_track_ptr = audio_track.get();
+                auto *audio_track_ptr = audio_track.get();
 
                 audio_track->onMessage(
-                    [this, publisher_index, audio_track_ptr](const rtc::binary& message) {
-                        auto* pub = publishers[publisher_index].get();
+                    [this, publisher_index, audio_track_ptr](const rtc::binary &message) {
+                        auto *pub = publishers[publisher_index].get();
                         std::lock_guard lock(pub->mutex);
 
                         if (pub->broadcasters[1] == nullptr) {
@@ -288,18 +318,17 @@ public:
 
             std::println("Publisher added: {}_{}", publisher_id, stream_type);
             return publisher_index;
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             std::println(stderr, "Failed to create publisher: {}", e.what());
             return std::unexpected(SFUError::ConnectionFailed);
         }
     }
 
     [[nodiscard]] std::expected<size_t, SFUError> addSubscriber(
-            std::string_view subscriber_id,
-            std::string_view publisher_id,
-            std::string_view stream_type) {
-        size_t publisher_index = SIZE_MAX;
-        {
+        std::string_view subscriber_id,
+        std::string_view publisher_id,
+        std::string_view stream_type) {
+        size_t publisher_index = SIZE_MAX; {
             std::unique_lock lock(publisher_mutex);
             for (std::size_t i = 0; i < publishers.size(); ++i) {
                 if (publishers[i]->publisher_id == publisher_id &&
@@ -318,7 +347,7 @@ public:
         // Wait for tracks
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        auto* publisher = publishers[publisher_index].get();
+        auto *publisher = publishers[publisher_index].get();
 
         auto broadcasters = publisher->get_valid_broadcasters();
 
@@ -332,14 +361,13 @@ public:
         try {
             auto pc = std::make_unique<rtc::PeerConnection>(config);
 
-            std::size_t subscriber_index{0};
-            {
+            std::size_t subscriber_index{0}; {
                 std::unique_lock lock(subscriber_mutex);
                 subscriber_index = subscribers.size();
                 subscribers.emplace_back(std::make_unique<SubscriberInfo>(std::move(pc), publisher_index));
             }
 
-            auto* subscriber = subscribers[subscriber_index].get();
+            auto *subscriber = subscribers[subscriber_index].get();
 
             subscriber->pc->onStateChange([this, subscriber_index](rtc::PeerConnection::State state) {
                 std::println("Subscriber state: {}", static_cast<int>(state));
@@ -351,12 +379,12 @@ public:
                 }
             });
 
-            subscriber->pc->onLocalCandidate([id = std::string(subscriber_id)](const rtc::Candidate& candidate) {
+            subscriber->pc->onLocalCandidate([id = std::string(subscriber_id)](const rtc::Candidate &candidate) {
                 std::println("Subscriber {} ICE: {}", id, std::string(candidate));
             });
 
             for (std::size_t i = 0; i < broadcasters.size(); ++i) {
-                auto* broadcaster = broadcasters[i];
+                auto *broadcaster = broadcasters[i];
                 auto media_desc = broadcaster->get_media_description();
 
                 rtc::Description::Media send_media(
@@ -375,7 +403,7 @@ public:
 
                 auto track = subscriber->pc->addTrack(send_media);
 
-                auto* track_ptr = track.get();
+                auto *track_ptr = track.get();
                 subscriber->tracks[i] = track_ptr;
 
                 track->onOpen([track_ptr]() {
@@ -394,22 +422,24 @@ public:
             std::println("Total subscribers: {}", publisher->subscriber_count.load());
 
             return subscriber_index;
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             std::println(stderr, "Failed to create subscriber: {}", e.what());
             return std::unexpected(SFUError::ConnectionFailed);
         }
     }
 
     void remove_subscriber(std::size_t subscriber_index) noexcept {
-        if (subscriber_index >= subscribers.size()) return;
+        if (subscriber_index >= subscribers.size()) {
+            return;
+        }
 
-        auto* subscriber = subscribers[subscriber_index].get();
+        auto *subscriber = subscribers[subscriber_index].get();
 
         if (!subscriber->active.exchange(false, std::memory_order_acquire)) {
             return;
         }
 
-        auto* publisher = publishers[subscriber->publisher_index].get();
+        auto *publisher = publishers[subscriber->publisher_index].get();
 
         for (std::size_t i = 0; i < MAX_TRACKS_PER_PUBLISHER; ++i) {
             if (subscriber->tracks[i] != nullptr &&
@@ -422,7 +452,8 @@ public:
 
         try {
             subscriber->pc->close();
-        } catch (...) {}
+        } catch (...) {
+        }
 
         subscriber->tracks.fill(nullptr);
 
@@ -440,11 +471,14 @@ public:
             }
         }
     }
+
 private:
     void cleanup_publisher(std::size_t publisher_index) noexcept {
-        if (publisher_index >= publishers.size()) return;
+        if (publisher_index >= publishers.size()) {
+            return;
+        }
 
-        auto* publisher = publishers[publisher_index].get();
+        auto *publisher = publishers[publisher_index].get();
 
         if (!publisher->running.exchange(false, std::memory_order_relaxed)) {
             return;
@@ -452,23 +486,22 @@ private:
 
         std::println("Cleaning up publisher: {}", publisher->publisher_id);
 
-        for (auto* broadcaster : publisher->broadcasters) {
+        for (auto *broadcaster: publisher->broadcasters) {
             if (broadcaster != nullptr) {
                 broadcaster->stop();
                 broadcaster_pool.release(broadcaster);
             }
         }
 
-        publisher->broadcasters.fill(nullptr);
-
-        {
+        publisher->broadcasters.fill(nullptr); {
             std::unique_lock lock(subscriber_mutex);
-            for (auto& subscriber : subscribers) {
+            for (auto &subscriber: subscribers) {
                 if (subscriber->publisher_index == publisher_index &&
                     subscriber->active.load(std::memory_order_relaxed)) {
                     try {
                         subscriber->pc->close();
-                    } catch (...) {}
+                    } catch (...) {
+                    }
                     subscriber->active.store(false, std::memory_order_relaxed);
                 }
             }
@@ -476,30 +509,30 @@ private:
 
         try {
             publisher->pc->close();
-        } catch (...) {}
+        } catch (...) {
+        }
     }
 
-    void cleanup() noexcept {
-        {
+    void cleanup() noexcept { {
             std::unique_lock lock(publisher_mutex);
-            for (auto& publisher : publishers) {
-                for (auto* broadcaster : publisher->broadcasters) {
+            for (auto &publisher: publishers) {
+                for (auto *broadcaster: publisher->broadcasters) {
                     if (broadcaster != nullptr) {
                         broadcaster->stop();
                     }
                 }
                 try {
                     publisher->pc->close();
-                } catch (...) {}
+                } catch (...) {
+                }
             }
-        }
-
-        {
+        } {
             std::unique_lock lock(subscriber_mutex);
-            for (auto& subscriber : subscribers) {
+            for (auto &subscriber: subscribers) {
                 try {
                     subscriber->pc->close();
-                } catch (...) {}
+                } catch (...) {
+                }
             }
         }
     }
@@ -507,8 +540,8 @@ private:
     rtc::Configuration config;
     std::mutex publisher_mutex;
     std::mutex subscriber_mutex;
-    std::vector<std::unique_ptr<PublisherInfo>> publishers;
-    std::vector<std::unique_ptr<SubscriberInfo>> subscribers;
+    std::vector<std::unique_ptr<PublisherInfo> > publishers;
+    std::vector<std::unique_ptr<SubscriberInfo> > subscribers;
     BroadcasterPool broadcaster_pool;
 };
 
