@@ -152,7 +152,7 @@ struct PublisherInfo {
     std::string stream_type;
 
     std::array<TrackBroadcaster *, MAX_TRACKS_PER_PUBLISHER> broadcasters{nullptr, nullptr};
-    alignas(32) std::atomic<size_t> subscriber_count{0};
+    alignas(32) std::atomic<std::size_t> subscriber_count{0};
     alignas(32) std::atomic<bool> running{true};
     std::mutex mutex; // 3 cache lines... Can be better I think
 
@@ -171,7 +171,7 @@ struct PublisherInfo {
     PublisherInfo &operator=(const PublisherInfo &) = delete;
 
     [[nodiscard]] std::span<TrackBroadcaster * const> get_valid_broadcasters() const noexcept {
-        size_t count = 0;
+        std::size_t count = 0;
         if (broadcasters[0] != nullptr) {
             ++count;
         }
@@ -185,12 +185,12 @@ struct PublisherInfo {
 struct SubscriberInfo {
     std::unique_ptr<rtc::PeerConnection> pc;
     std::array<rtc::Track *, MAX_TRACKS_PER_PUBLISHER> tracks{nullptr, nullptr};
-    size_t publisher_index{0};
+    std::size_t publisher_index{0};
     alignas(32) std::atomic<bool> active{true}; // 64 bytes is a good size
 
     SubscriberInfo() noexcept = default;
 
-    explicit SubscriberInfo(std::unique_ptr<rtc::PeerConnection> p, size_t pub_idx) noexcept
+    explicit SubscriberInfo(std::unique_ptr<rtc::PeerConnection> p, std::size_t pub_idx) noexcept
         : pc(std::move(p)), publisher_index(pub_idx) {
     }
 
@@ -203,7 +203,7 @@ struct SubscriberInfo {
     SubscriberInfo &operator=(const SubscriberInfo &) = delete;
 
     [[nodiscard]] std::span<rtc::Track * const> get_valid_tracks() const noexcept {
-        size_t count = 0;
+        std::size_t count = 0;
         if (tracks[0] != nullptr) {
             ++count;
         }
@@ -227,7 +227,7 @@ public:
         cleanup();
     }
 
-    [[nodiscard]] std::expected<size_t, SFUError>
+    [[nodiscard]] std::expected<std::size_t, SFUError>
     add_publisher(std::string_view publisher_id, std::string_view stream_type) { {
             std::lock_guard lock(publisher_mutex);
             for (const auto &pub: publishers) {
@@ -241,7 +241,7 @@ public:
         try {
             auto pc = std::make_unique<rtc::PeerConnection>(config);
 
-            size_t publisher_index{0}; {
+            std::size_t publisher_index{0}; {
                 std::unique_lock lock(publisher_mutex);
                 publisher_index = publishers.size();
                 publishers.emplace_back(
@@ -324,11 +324,11 @@ public:
         }
     }
 
-    [[nodiscard]] std::expected<size_t, SFUError> addSubscriber(
+    [[nodiscard]] std::expected<std::size_t, SFUError> addSubscriber(
         std::string_view subscriber_id,
         std::string_view publisher_id,
         std::string_view stream_type) {
-        size_t publisher_index = SIZE_MAX; {
+        std::size_t publisher_index = SIZE_MAX; {
             std::unique_lock lock(publisher_mutex);
             for (std::size_t i = 0; i < publishers.size(); ++i) {
                 if (publishers[i]->publisher_id == publisher_id &&
