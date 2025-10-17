@@ -1,2 +1,7 @@
 cmake-build-debug/
 .idea/
+build/
+vcpkg_installed/
+llvm.sh
+.cache
+compile_commands.json
